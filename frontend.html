@@ -1,0 +1,357 @@
+	<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BNB Split!</title>
+  <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.9/vue.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/element-ui/2.14.0/index.js"></script>
+  <link href="https://cdn.bootcdn.net/ajax/libs/element-ui/2.14.0/theme-chalk/index.css" rel="stylesheet">
+  <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+  <link href="https://cdn.bootcdn.net/ajax/libs/Chart.js/2.9.4/Chart.min.css" rel="stylesheet">
+  <script src="https://cdn.bootcdn.net/ajax/libs/vue-chartjs/3.5.1/vue-chartjs.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/web3/1.3.0/web3.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/bignumber.js/9.0.1/bignumber.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <el-container>
+      <el-header>
+        <h1>BNB Split!</h1>
+      </el-header>
+      <el-container>
+        <el-aside width="60%">
+          <el-row>
+            <el-col :span="22" :offset="1">
+              <el-table :data="tableData" style="width: 100%">
+                <el-table-column prop="name" label="Name"></el-table-column>
+                <el-table-column prop="amount" label="Amount"></el-table-column>
+                <el-table-column prop="txGas" label="TxGas"></el-table-column>
+                <el-table-column prop="diff" label="Diff"></el-table-column>
+                <el-table-column label="Switch">
+                  <template slot-scope="scope">
+                    <el-switch v-model="scope.row.selected" @input="dexSwitched(scope.row)"></el-switch>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-col>
+          </el-row>
+        </el-aside>
+        <el-main>
+          <el-card class="box-card">
+            <el-row>
+              <line-chart :chart-data="chartdata"></line-chart>
+            </el-row>
+            <el-row style="margin-top: 10px;">
+              <el-col :span="22" :offset="1">
+                <el-form label-position="top">
+                  <el-form-item label="Pay">
+                    <el-row :gutter="10">
+                      <el-col :span="16">
+                        <el-input-number v-model="formData.pay" @change="payChanged" :controls="false"></el-input>
+                      </el-col>
+                      <el-col :span="8">
+                        <el-select v-model="formData.fromCoin">
+                          <el-option v-for="item in coinList1" :key="item.value" :label="item.label" :value="item.value"></el-option>
+                        </el-select>
+                      </el-col>
+                    </el-row>
+                  </el-form-item>
+                  <el-form-item label="Receive">
+                    <el-row :gutter="10">
+                      <el-col :span="16">
+                        <el-input v-model="formData.receive" :readonly="true" class="readonly-number-input"></el-input>
+                      </el-col>
+                      <el-col :span="8">
+                        <el-select v-model="formData.toCoin">
+                          <el-option v-for="item in coinList2" :key="item.value" :label="item.label" :value="item.value"></el-option>
+                        </el-select>
+                      </el-col>
+                    </el-row>
+                  </el-form-item>
+				   <el-form-item>
+                    <el-button type="primary" @click="Query">Query</el-button>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="connectWallet" v-if="web3 == null">Connect to Wallet</el-button>
+                    <el-button type="primary" @click="swapT" v-else>Swap</el-button>
+                  </el-form-item>
+                </el-form>
+              </el-col>
+            </el-row>
+          </el-card>
+        </el-main>
+      </el-container>
+      <el-footer>BNB Split! 2020</el-footer>
+    </el-container>
+  </div>
+  <script>
+   var ABI =[
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "amountIn",
+    "type": "uint256"
+   },
+   {
+    "internalType": "uint256",
+    "name": "amountOutMin",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address[]",
+    "name": "path",
+    "type": "address[]"
+   },
+   {
+    "internalType": "address",
+    "name": "to",
+    "type": "address"
+   },
+   {
+    "internalType": "uint256",
+    "name": "deadline",
+    "type": "uint256"
+   }
+  ],
+  "name": "test_bscSwap",
+  "outputs": [
+   {
+    "internalType": "uint256[]",
+    "name": "amounts_return",
+    "type": "uint256[]"
+   }
+  ],
+  "stateMutability": "payable",
+  "type": "function"
+ },
+ {
+  "inputs": [
+   {
+    "internalType": "uint256",
+    "name": "amountIn",
+    "type": "uint256"
+   },
+   {
+    "internalType": "address[]",
+    "name": "path",
+    "type": "address[]"
+   }
+  ],
+  "name": "test_getAmountsOut",
+  "outputs": [
+   {
+    "internalType": "uint256[]",
+    "name": "amounts",
+    "type": "uint256[]"
+   }
+  ],
+  "stateMutability": "nonpayable",
+  "type": "function"
+ }
+]
+	var FlagMap = new Map();
+	FlagMap.set("burgerSwap",0x01+0x02+0x04);FlagMap.set("bakerySwap",0x08+0x10);FlagMap.set("cheeseSwap",0x20+0x40);
+	FlagMap.set("bscSwap",0x80+0x100);FlagMap.set("pancakeswap",0x200+0x400);
+   var ContractAddress="0xd2f160263d0aace7988e73be3026b59f45b22359";
+   var HttpP="https://data-seed-prebsc-1-s1.binance.org:8545/";
+   var CoinAddress = new Map();
+   CoinAddress.set("WBNB","0xae13d989dac2f0debff460ac112a837c89baa7cd");
+   CoinAddress.set("BSWAP","0x77D57b72D547035B51D1B722796bF23cD46B5186");
+   CoinAddress.set("BUSD","0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee");
+   CoinAddress.set("BTCB","0x6ce8da28e2f864420840cf74474eff5fd80e65b8");
+   CoinAddress.set("ETH","0xd66c6B4F0be8CE5b39D52E0Fd1344c389929B378");
+   if (typeof wq!== 'undefined') {
+       wq = new Web3(wq.currentProvider);
+		 
+   } else {
+       // set the provider you want from Web3.providers
+       wq = new Web3(new Web3.providers.HttpProvider(HttpP));
+   }
+   
+    var Contract =  new wq.eth.Contract(ABI,ContractAddress);
+	
+	
+	
+					var ABITT=[{"constant":true,"inputs":[{"name":"fromToken","type":"address"},{"name":"destToken","type":"address"},{"name":"amount","type":"uint256"},{"name":"parts","type":"uint256"},{"name":"flags","type":"uint256"}],"name":"getExpectedReturn","outputs":[{"name":"returnAmount","type":"uint256"},{"name":"distribution","type":"uint256[]"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":true,"inputs":[{"name":"fromToken","type":"address"},{"name":"destToken","type":"address"},{"name":"amount","type":"uint256"},{"name":"parts","type":"uint256"},{"name":"flags","type":"uint256"},{"name":"destTokenBNBPriceTimesGasPrice","type":"uint256"}],"name":"getExpectedReturnWithGas","outputs":[{"name":"returnAmount","type":"uint256"},{"name":"estimateGasAmount","type":"uint256"},{"name":"distribution","type":"uint256[]"}],"payable":false,"stateMutability":"view","type":"function"},{"constant":false,"inputs":[{"name":"fromToken","type":"address"},{"name":"destToken","type":"address"},{"name":"amount","type":"uint256"},{"name":"minReturn","type":"uint256"},{"name":"distribution","type":"uint256[]"},{"name":"flags","type":"uint256"}],"name":"swap","outputs":[{"name":"returnAmount","type":"uint256"}],"payable":true,"stateMutability":"payable","type":"function"}]
+				var cinstance = new wq.eth.Contract(ABITT,'0x790E191416C76bA13eC6fAc1e153e34E8F18f78C');
+				
+				<!-- cinstance.methods.getExpectedReturn('0xae13d989dac2f0debff460ac112a837c89baa7cd','0xd66c6b4f0be8ce5b39d52e0fd1344c389929b378','1110000000000000000',1,1919).call().then(result => {console.log(result[0])}); -->
+				
+				
+				
+  </script>
+  
+  <script>
+    Vue.component('line-chart', {
+      extends: VueChartJs.Line,
+      mixins: [ VueChartJs.mixins.reactiveProp ],
+      props: ['options'],
+      mounted: function () {
+        this.renderChart(this.chartData, this.options)
+      }
+    })
+    var app = new Vue({
+      el: '#app',
+      data: {
+        web3: null,
+        formData: {
+          pay: '200',
+          receive: '',
+          fromCoin: 'WBNB',
+          toCoin: 'BUSD'
+        },
+		coinList1: [
+          { label: "WBNB", value: 1 }
+        ],
+        coinList2: [
+          { label: "WBNB", value: 1 },
+          { label: "BSWAP", value: 2 },
+		  { label: "BUSD", value: 3 },
+		  { label: "BTCB", value: 4 },
+		  { label: "ETH", value: 5 }
+        ],
+        tableData: [
+          {
+            name: 'pancakeswap',
+            amount: "No available",
+            txGas: 0.2333,
+            diff: 1.0,
+            selected: true
+          },
+		  {
+            name: 'burgerSwap',
+            amount: "No available",
+            txGas: 0.2333,
+            diff: 1.0,
+            selected: true
+          },
+		  {
+            name: 'bakerySwap',
+            amount: "No available",
+            txGas: 0.2333,
+            diff: 1.0,
+            selected: true
+          },
+		  {
+            name: 'bscSwap',
+            amount: "No available",
+            txGas: 0.2333,
+            diff: 1.0,
+            selected: true
+          },
+		  {
+            name: 'cheeseSwap',
+            amount: "No available",
+            txGas: 0.2333,
+            diff: 1.0,
+            selected: true
+          }
+        ],
+        chartdata: {
+          labels: [10, 20],
+          datasets: [
+            {
+              label: 'Data One',
+              data: [1, 2]
+            },
+            {
+              label: 'Data Two',
+              data: [3, 4]
+            }
+          ]
+        }
+      },
+      methods: {
+		
+        dexSwitched: function (row) {
+          console.log(row)
+        },
+        payChanged: function () {
+          this.formData.receive = this.formData.pay * 2;
+        },
+        connectWallet: function () {
+          console.log('to wallet!')
+          if (window.ethereum) {
+		  
+            w3 = new Web3(window.ethereum)
+            window.ethereum
+              .request({ method: 'eth_requestAccounts' })
+              .then(() => { this.web3 = w3 })
+			 console.log(web3) 
+			 
+          } else {
+            alert('Wallet is not available!')
+          }
+        },
+		swapT: function(){
+		
+		
+		
+		
+		},
+		Query: function(){
+				var t = this.tableData;
+				var val = this.formData;
+				var tens = '1000000000000000000';
+				var amountIn = new BigNumber(val.pay).times(tens);
+				var disable_all = 0x01+0x02+0x04+0x08+0x10+0x20+0x40+0x80+0x100+0x200+0x400;
+				console.log("success")
+				
+
+					
+					cinstance.methods.getExpectedReturn(CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin),amountIn.toString(),1,disable_all-FlagMap.get(this.tableData[0].name)).call().then(res => {
+								t[0].amount =  new BigNumber(res[0]).div(tens).toString();
+					})
+					cinstance.methods.getExpectedReturn(CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin),amountIn.toString(),1,disable_all-FlagMap.get(this.tableData[1].name)).call().then(res => {
+								t[1].amount =  new BigNumber(res[0]).div(tens).toString();
+					})
+					cinstance.methods.getExpectedReturn(CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin),amountIn.toString(),1,disable_all-FlagMap.get(this.tableData[2].name)).call().then(res => {
+								t[2].amount =  new BigNumber(res[0]).div(tens).toString();
+					})
+					cinstance.methods.getExpectedReturn(CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin),amountIn.toString(),1,disable_all-FlagMap.get(this.tableData[3].name)).call().then(res => {
+								t[3].amount =  new BigNumber(res[0]).div(tens).toString();
+					})
+					cinstance.methods.getExpectedReturn(CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin),amountIn.toString(),1,disable_all-FlagMap.get(this.tableData[4].name)).call().then(res => {
+								var RecTokens = new BigNumber(res[0]).div(tens).toString();t[4].amount = RecTokens;
+					})
+					
+				for(var num = 0;num<5;num++){
+				
+				}
+				<!-- var flag = 0; -->
+				<!-- for(var num = 0;num<5;num++)	flag = flag + FlagMap.get(this.tableData[num].name); -->
+				
+				
+				//Contract.methods.test_getAmountsOut(val.pay,[CoinAddress.get(val.fromCoin),CoinAddress.get(val.toCoin)]).call().then(res => {
+				//for(var num = 0;num<5;num++)	this.tableData[num].amount = res[num];
+			//	});
+		
+		},
+      },
+	  watch:{
+		
+	  }
+    })
+  </script>
+  
+
+   
+  <style>
+    .el-header {
+      margin-bottom: 20px;
+    }
+    .el-footer {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .el-input-number {
+      width: 100%;
+    }
+    .readonly-number-input > input {
+      text-align: center;
+    }
+  </style>
+</body>
+</html>
